@@ -17,3 +17,6 @@ https://kubernetes.io/docs/concepts/windows/user-guide/
 https://kubernetes.io/docs/concepts/services-networking/
 
 https://matthewpalmer.net/kubernetes-app-developer/articles/kubernetes-ingress-guide-nginx-example.html
+
+
+(https://kubernetes.github.io/ingress-nginx/user-guide/basic-usage/)
