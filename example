@@ -1,0 +1,460 @@
+Kubernetes Networking: Ingress with NGINX
+
+NGINX ingress controller  
+Kubernetes has advanced networking capabilities that allow Pods and Services to communicate inside the cluster's network. An ingress enables inbound connections to the cluster, allowing external traffic to reach the correct Pod.
+Ingress enables externally reachable URLs, load balances traffic, terminates SSL, and offers name-based virtual hosting for a Kubernetes cluster.
+
+
+In this scenario, you will learn how to deploy an ingress controller and configure ingress rules to manage incoming HTTP requests.
+
+NGINX is a web server that can also be used as a reverse proxy, load balancer, mail proxy, and HTTP cache.
+
+Install the NGINX Ingress Controller
+    🏅 Declare a few ingress rules
+    🏅 Use NGINX canary rules
+Your Kubernetes Cluster
+
+For this scenario, we've just started a fresh Kubernetes cluster for you. Verify that it's Ready and ok:
+
+{ clear && \
+  echo -e "\n=== Kubernetes Status ===\n" && \
+  kubectl get --raw '/healthz?verbose' && \
+  kubectl version --short && \
+  kubectl get nodes && \
+  kubectl cluster-info; 
+} | grep -z 'Ready\| ok\|passed\|running’
+Find this example in :https://learning.oreilly.com/scenarios/kubernetes-networking-ingress/9781098131708/
+The Helm package manager used for installing applications on Kubernetes is also available.
+helm version —short
+
+Kubernetes Dashboard
+You can administer your cluster with the kubectl command-line tool or use the Kubernetes Dashboard. Use this script to access the protected Dashboard:
+
+🔑 k8s-dash-token.sh
+
+********************************************************************************
+
+Deploy Application
+
+To start, deploy an example HTTP server that will be the target of our requests. This deployment contains three Deployments: webapp1, webapp2, and webapp3 (with a Service for each):
+
+less webapps.yaml | tee
+
+Apply these Deployments and Services:
+
+kubectl apply -f webapps.yaml
+
+Check the deployment status with:
+
+kubectl get deployments,pods,services
+
+In a moment each Deployment availability will change from 0 to 1.
+
+Each service is available, but can only be reached by other applications within the cluster. These services are of the type ClusterIP, which means they are only exposed to other applications within the Kubernetes cluster and external services cannot reach them. Using an internal Pod based on Busybox with curl installed, you can verify that each web app responds with its simple return message. Start the Pod with an available curl utility:
+
+kubectl run curler --image=radial/busyboxplus:curl --command -- sleep 3600
+
+To break the ice (😏), use the curler to query each web app:
+
+kubectl exec -it curler -- curl http://webapp1-svc
+
+kubectl exec -it curler -- curl http://webapp2-svc
+
+kubectl exec -it curler -- curl http://webapp3-svc
+
+While this curling technique works, notice that a curl from outside the cluster does not work:
+
+curl -v http://webapp1-svc
+
+To access these services, we add an ingress.
+
+*******************************************************************************$ less webapps.yaml | tee
+
+$ less webapps.yaml | tee
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webapp1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: webapp1
+  template:
+    metadata:
+      labels:
+        app: webapp1
+    spec:
+      containers:
+      - name: webapp1
+        image: katacoda/docker-http-server:latest
+        ports:
+        - containerPort: 80
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webapp2
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: webapp2
+  template:
+    metadata:
+      labels:
+        app: webapp2
+    spec:
+      containers:
+      - name: webapp2
+        image: katacoda/docker-http-server:latest
+        ports:
+        - containerPort: 80
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webapp3
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: webapp3
+  template:
+    metadata:
+      labels:
+        app: webapp3
+    spec:
+      containers:
+      - name: webapp3
+        image: katacoda/docker-http-server:latest
+        ports:
+        - containerPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: webapp1-svc
+  labels:
+    app: webapp1
+spec:
+  ports:
+  - port: 80
+  selector:
+    app: webapp1
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: webapp2-svc
+  labels:
+    app: webapp2
+spec:
+  ports:
+  - port: 80
+  selector:
+    app: webapp2
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: webapp3-svc
+  labels:
+    app: webapp3
+spec:
+  ports:
+  - port: 80
+  selector:
+    app: webapp3
+
+********************************************************
+Install Ingress Controller
+Two important parts of setting up ingress routes are having an ingress controller and submitting some ingress rules. First, let's install an ingress controller.
+
+Ingress Controller Choices
+Out of the box, Kubernetes comes with a variety of controllers for all its standard resources. Unfortunately, Kubernetes does not provide a preinstalled ingress controller. Most Kubernetes as a Service (KaaS) offerings will have an opinionate ingress controller installed, but in many cases (such as with Minikube or these scenarios), the choice of ingress controller is up to you. They are also referred to as "service proxies." There are many to choose from, and they are constantly changing and improving. When first introduced to ingress controllers, people gravitate toward the NGINX offering, but there are many others as listed in the Kubernetes documentation or the CNCF.
+
+Install NGINX Service Proxy Ingress Controller
+There are a variety of techniques to install NGINX as an ingress controller, but the best way is to leverage this work from the NGINX experts. NGINX provides a Helm chart that simplifies installation and configuration.
+
+Inform Helm about the NGINX Chart repo:
+
+helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx && helm repo update && helm repo list
+
+Install the NGINX Ingress Controller:
+
+VERSION=4.0.18
+
+helm install my-ingresser ingress-nginx/ingress-nginx \
+  --version $VERSION \
+  --set controller.service.externalIPs={172.21.156.5}
+
+The setting for externalIP tells NGINX that we'll be accessing it from the IP of the controlplane node. You can see the IPs of the cluster nodes:
+
+kubectl get nodes -o wide | grep -C1 172.21.156.5
+
+Like most things Kubernetes, the controller runs in a Pod and it will be Running in a few moments:
+
+kubectl get pods -l app.kubernetes.io/name=ingress-nginx
+
+The Ingress control Service is set to the type LoadBalancer, so let's establish the HOST and PORT for the ingress access:
+
+export HTTP_NODE_PORT=80
+
+export NODE_NAME=$(kubectl --namespace default get nodes -o jsonpath="{.items[0].status.addresses[1].address}")
+
+export INGRESS_URL=http://$NODE_NAME:$HTTP_NODE_PORT
+
+With this, a typical service call can be accessed through this URL:
+
+echo $INGRESS_URL/some-service
+
+With this new entry point, try to access one of the web apps:
+
+curl $INGRESS_URL/webapp1 | grep -C1 404
+
+We are closer, but are still getting a 404 because the ingress controller (NGINX) does not know where to route the request. With the controller ready, it's time to configure those ingress rules to route traffic to the three web apps.
+
+*****************************************************************************************
+
+Routing Rules for Single Service
+Ingress rules are standard resource types in Kubernetes. Currently, you can verify that there are no rules defined:
+
+kubectl get ingress
+
+Let's start with a simple example to set a rule to a single target, like this:
+
+less ingress-single.yaml | tee
+
+The rules apply to requests for the host my-app.com. A single rule is defined based on the path request with a single catch-all definition. Requests to the path /webapp1 are forwarded onto the service webapp1-svc.
+
+Apply this rule to the controller:
+
+kubectl apply -f ingress-single.yaml
+
+Inspect the ingress:
+
+kubectl get ingress
+
+kubectl describe ingress
+
+Access the first app:
+
+curl $INGRESS_URL/webapp1
+
+Now the ingress is working! Notice that other service attempts will still return the default 404 error, since those routes have yet to be defined:
+
+curl $INGRESS_URL/unknown
+
+curl  $INGRESS_URL/webapp2
+
+A host value must be applied that matches the wildcard host root defined in the ingress rule. This helps the ingress router to connect traffic from a host to a specific service. This allows you to define varying ingresses for different hosts.
+
+You can also access the service through the public internet:
+
+curl https://c88eb7b53caf49a6b6fcdabd1e67a09e-2887097349-80-kira01.environments.katacoda.com/webapp1
+
+You can also click on this link or above the terminal area labeled Web App 1 and access the same app from your web browser.
+
+Notice that the access is http, not https, to port 80 and there is no encryption. With a few extra steps of configuration, the ingress proxies offer standard SSL terminations; however, this scenario remains focused on just http access.
+
+Clear
+In preparation for a new ingress declaration, let's clear these rules:
+
+kubectl delete -f ingress-single.yaml
+
+***********************************************************************
+less ingress-single.yaml | tee
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: single-route
+spec:
+  ingressClassName: nginx
+  rules:
+  - http:
+      paths:
+      - path: /webapp1
+        pathType: Prefix
+        backend:
+          service:
+            name: webapp1-svc
+            port: 
+              number: 80
+*****************************************************
+Routing Rules with Host
+Ingress rules are an object type with Kubernetes. Currently, there are no rules defined:
+
+kubectl get ingress
+
+Simple Rule for Single Route
+Let's start with a simple example to set a rule to a single target like this:
+
+less ingress-single.yaml | tee
+
+The rules apply to requests for the host my-app.com. A single rule is defined based on the path request with a single catch-all definition. Requests to the path /webapp1 are forwarded onto the service webapp1-svc.
+
+Apply this rule to the controller:
+
+kubectl apply -f ingress-single.yaml
+
+Inspect the ingress:
+
+kubectl get ingress
+
+kubectl describe ingress
+
+Access the first app:
+
+curl -H "Host: my-app.environments.katacoda.com" $INGRESS_URL/webapp1
+
+Now the ingress is working! Notice that other service attempts will still return the default 404 error, since those routes have yet to be defined:
+
+curl -H "Host: my-app.environments.katacoda.com" $INGRESS_URL/unknown
+
+curl -H "Host: my-app.environments.katacoda.com" $INGRESS_URL/webapp2
+
+A host value must be applied that matches the wildcard host root defined in the ingress rule. This helps the ingress router to connect traffic from a host to a specific service. This allows you to define varying ingresses for different hosts.
+
+You can also access the service through the public internet:
+
+curl https://c88eb7b53caf49a6b6fcdabd1e67a09e-2887097349-80-kira01.environments.katacoda.com/webapp1
+
+You can also click on this link or above the terminal area labeled Web App 1 and access the same app from your web browser. Through these more realistic routes, the host value environments.katacoda.com is appropriately matched.
+
+Notice the access is http, not https, to port 80 and there is no encryption. With a few extra steps of configuration, the ingress proxies offer standard SSL terminations; however, this scenario remains focused on just http access.
+
+Clear
+In preparation for a new ingress declaration, let's clear these rules:
+
+kubectl delete -f ingress-single.yaml
+
+***********************************************************************
+Routing Rules for Multiple Services
+The next rule will define routes for all three web apps:
+
+less ingress-multiple.yaml | tee
+
+Three rules are defined based on the path request with a single catch-all definition. Requests to the path /webapp1 are forwarded onto the service webapp1-svc. Likewise, the requests to /webapp2 are forwarded to webapp2-svc. If no rules apply, webapp3-svc will be used.
+
+Apply this ingress rule:
+
+kubectl apply -f ingress-multiple.yaml
+
+Access each web app:
+
+curl -H "Host: my-app.environments.katacoda.com" $INGRESS_URL/webapp1
+
+curl -H "Host: my-app.environments.katacoda.com" $INGRESS_URL/webapp2
+
+curl -H "Host: my-app.environments.katacoda.com" $INGRESS_URL/webapp3
+
+Based on the rule, notice that all other unknown routes default to webapp3:
+
+curl -H "Host: my-app.environments.katacoda.com" $INGRESS_URL/unknown
+
+You can also access the services through the public internet:
+
+curl https://c88eb7b53caf49a6b6fcdabd1e67a09e-2887097349-80-kira01.environments.katacoda.com/webapp1
+
+You can also click on this link or above the terminal areas labeled Web App 1, Web App 2, and Web App 3 and access the same apps from your web browser.
+
+In preparation for a new ingress, let's clear these rules:
+
+kubectl delete -f ingress-multiple.yaml
+
+*************************************************************
+
+less ingress-multiple.yaml | tee
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: multiple-routes
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: "*.environments.katacoda.com"
+    http:
+      paths:
+      - path: /webapp1
+        pathType: Prefix
+        backend:
+          service:
+            name: webapp1-svc
+            port: 
+              number: 80
+      - path: /webapp2
+        pathType: Prefix
+        backend:
+          service:
+            name: webapp2-svc
+            port: 
+              number: 80
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: webapp3-svc
+            port: 
+              number: 80
+*********************************************************************
+Routing Rules for Canary Service
+The next rule defines routes for 60% of the traffic to go to webapp1 and 40% to webapp2. This might be appropriate if you are considering webapp2 as your canary version.
+
+less ingress-canary.yaml | tee
+
+Apply this ingress rule for canary routing:
+
+kubectl apply -f ingress-canary.yaml
+
+Try hitting this URL multiple times.
+
+curl -H "Host: my-app.environments.katacoda.com" $INGRESS_URL/webapp1
+
+Observe with the multiple calls how the traffic is roughly split 80/20 between webapp1 and webapp2.
+
+There is much more to ingressing and configuring both the controller and the ingress rules, but this scenario got you
+
+***********************************************************************************************less ingress-canary.yaml | tee
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: canary-example-to-default
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: "*.environments.katacoda.com"
+    http:
+      paths:
+      - path: /webapp1
+        pathType: Prefix
+        backend:
+          service:
+            name: webapp1-svc
+            port: 
+              number: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: canary-example-to-canary
+  annotations:
+    # Enable canary and send 20% of traffic to version 2
+    nginx.ingress.kubernetes.io/canary: "true"
+    nginx.ingress.kubernetes.io/canary-weight: "40"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: "*.environments.katacoda.com"
+    http:
+      paths:
+      - path: /webapp1
+        pathType: Prefix
+        backend:
+          service:
+            name: webapp2-svc
+            port: 
+              number: 80
+*****************************************************************
