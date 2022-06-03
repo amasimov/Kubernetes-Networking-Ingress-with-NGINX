@@ -1,0 +1,18 @@
+
+
+https://vincentlauzon.com/2018/10/10/about-ingress-in-azure-kubernetes-service-aks/
+
+
+You can also create a NodePort service, which has an externally routable IP outside the cluster, but points to a pod that exists within your cluster. This could be an Ingress Controller.
+
+An Ingress Controller is simply a pod that is configured to interpret ingress rules. One of the most popular ingress controllers supported by kubernetes is nginx
+
+
+Load Balancer: A kubernetes LoadBalancer service is a service that points to externaload balancers that are NOT in your kubernetes cluster,
+but exist elsewhere. They can work with your pods, assuming that your pods are externally routable.
+
+Ingress: An ingress is really just a set of rules to pass to a controller that is listening for them. You can deploy a bunch of ingress rules, but nothing will happen unless you have a controller that can process them.
+A LoadBalancer service could listen for ingress rules, if it is configured to do so.
+
+You can also create a NodePort service, which has an externally routable IP outside the cluster, but points to a pod that exists within your cluster. This could be an Ingress Controller.
+An Ingress Controller is simply a pod that is configured to interpret ingress rules. One of the most popular ingress controllers supported by kubernetes is nginx
